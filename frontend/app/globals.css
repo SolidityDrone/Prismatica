@@ -1,0 +1,836 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+
+/* Update the color variables to use more black and vivid green */
+:root {
+  --cyber-bg: #000000;
+  --cyber-bg-alt: #0a0a0a;
+  --cyber-text: #33ff33;
+  --cyber-text-dim: #1a8a1a;
+  --cyber-primary: #33ff33;
+  --cyber-secondary: #00aa00;
+  --cyber-accent: #00ff00;
+  --cyber-error: #ff3333;
+  --cyber-success: #00ff00;
+  --cyber-border: #1a8a1a;
+  --cyber-glow: 0 0 10px rgba(0, 255, 0, 0.7);
+  --cyber-glow-strong: 0 0 15px rgba(0, 255, 0, 0.9);
+  --grid-size: 20px;
+}
+/* Position the monitorFrame relatively to act as a container for the absolutely positioned browserView */
+.monitorFrame {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border: 2px solid var(--cyber-border);
+  border-radius: 8px;
+  overflow: visible;
+  background-color: var(--cyber-bg);
+  box-shadow: var(--cyber-glow);
+}
+
+/* Global Styles */
+.cyberContainer {
+  background-color: var(--cyber-bg);
+  color: var(--cyber-text);
+  min-height: 100vh;
+  width: 100%;
+  padding: 1rem;
+  font-family: "Courier New", monospace;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.cyberContainer::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(to right, var(--cyber-bg) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--cyber-bg) 1px, transparent 1px);
+  background-size: var(--grid-size) var(--grid-size);
+  opacity: 0.1;
+  z-index: -1;
+}
+
+/* ASCII Art Header with Prismatic Effect */
+.asciiHeader {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 20;
+  background-color: rgba(0, 0, 0, 0.8);
+  padding: 0.5rem 0;
+}
+
+/* Update the ASCII art color to match the new green theme */
+.asciiArt {
+  color: var(--cyber-primary);
+  font-size: 0.6rem;
+  line-height: 1;
+  white-space: pre;
+  margin: 0;
+  position: relative;
+  z-index: 2;
+  mix-blend-mode: lighten;
+  text-shadow: 0 0 5px var(--cyber-primary);
+}
+
+.prismaticEffect {
+  background: linear-gradient(124deg, #00ff00, #33ff33, #66ff66, #99ff99, #ccffcc, #33ff33, #00ff00);
+  background-size: 1800% 1800%;
+  animation: prismaticAnimation 10s ease infinite;
+  opacity: 0.3;
+  z-index: 1;
+}
+
+@keyframes prismaticAnimation {
+  0% {
+    background-position: 0% 82%;
+  }
+  50% {
+    background-position: 100% 19%;
+  }
+  100% {
+    background-position: 0% 82%;
+  }
+}
+
+/* Main Interface */
+.mainInterface {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 75%;
+  margin: 0 auto;
+  padding-top: 60vh;
+}
+
+/* Control Panel */
+.controlPanel {
+  background-color: var(--cyber-bg-alt);
+  border: 1px solid var(--cyber-border);
+  border-radius: 4px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+  position: fixed;
+  top: 15%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 70%;
+  max-width: 1008px;
+  z-index: 15;
+  background-color: rgba(0, 0, 0, 0.9);
+}
+
+.controlRow {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* Update buttons to match the old console style */
+.cyberButton {
+  background-color: #000000;
+  color: var(--cyber-primary);
+  border: 1px solid var(--cyber-primary);
+  padding: 0.5rem 1rem;
+  font-family: "Courier New", monospace;
+  font-size: 0.9rem;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cyberButton:hover {
+  background-color: rgba(0, 255, 0, 0.1);
+  box-shadow: var(--cyber-glow);
+}
+
+.cyberButton:active {
+  transform: translateY(1px);
+}
+
+/* Update the button glow animation */
+.buttonGlow {
+  background: linear-gradient(90deg, transparent, rgba(0, 255, 0, 0.2), transparent);
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  animation: buttonGlowAnim 3s infinite;
+}
+
+@keyframes buttonGlowAnim {
+  0% {
+    left: -100%;
+  }
+  50% {
+    left: 100%;
+  }
+  100% {
+    left: 100%;
+  }
+}
+
+/* URL Control */
+.urlControl {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+/* Update the URL input */
+.urlInputWrapper {
+  background-color: #000000;
+  border: 1px solid var(--cyber-border);
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 0 0.5rem;
+}
+
+.urlIcon {
+  color: var(--cyber-text-dim);
+  margin-right: 0.5rem;
+}
+
+/* Update the URL input */
+.urlInput {
+  color: var(--cyber-text);
+  background-color: transparent;
+  border: none;
+  font-family: "Courier New", monospace;
+  padding: 0.5rem;
+  width: 100%;
+  outline: none;
+}
+
+.urlInput::placeholder {
+  color: var(--cyber-text-dim);
+}
+
+/* Stream Controls */
+.streamControls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.streamStatus {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.statusDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+/* Update the status indicators */
+.connected .statusDot {
+  background-color: var(--cyber-success);
+  box-shadow: 0 0 10px var(--cyber-success);
+}
+
+.disconnected .statusDot {
+  background-color: var(--cyber-error);
+  box-shadow: 0 0 10px var(--cyber-error);
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* Update the coordinates display */
+.coordinates {
+  background-color: #000000;
+  color: var(--cyber-text);
+  border: 1px solid var(--cyber-border);
+  font-family: "Courier New", monospace;
+  font-size: 0.9rem;
+  margin-left: auto;
+  padding: 0.5rem;
+}
+
+.coordLabel {
+  color: var(--cyber-primary);
+  margin-right: 0.25rem;
+  margin-left: 0.5rem;
+}
+
+/* Status Messages */
+.status {
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+.error {
+  background-color: rgba(255, 62, 62, 0.1);
+  border: 1px solid var(--cyber-error);
+  color: var(--cyber-error);
+}
+
+.success {
+  background-color: rgba(0, 255, 127, 0.1);
+  border: 1px solid var(--cyber-success);
+  color: var(--cyber-success);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Update the monitor frame to look more like an old console and remove the scanning line */
+.monitorFrame::before {
+  content: "";
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  border: 1px solid rgba(0, 255, 0, 0.3);
+  pointer-events: none;
+}
+
+/* Remove the after pseudo-element completely */
+.monitorFrame::after {
+  display: none;
+}
+
+/* Browser Container with Frame */
+.browserContainer {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  margin: 1rem 0;
+  padding: 0 1rem;
+}
+
+/* Update the browser view to match the old console style */
+.browserView {
+  width: 100%;
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background-color: #000;
+  overflow: hidden;
+  border: 1px solid var(--cyber-primary);
+  box-shadow: inset 0 0 20px rgba(0, 255, 0, 0.2);
+  transform-origin: top center;
+}
+
+/* Remove the old ASCII monitor styles that are no longer needed */
+.monitorTop,
+.monitorBottom,
+.monitorSides,
+.monitorLeft,
+.monitorRight {
+  display: none;
+}
+
+.browserView.focused {
+  box-shadow: inset 0 0 30px rgba(0, 255, 0, 0.4);
+}
+
+.screenshot {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* Update the overlay to have a subtle green tint */
+.overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+  background: radial-gradient(circle at center, transparent 95%, rgba(0, 255, 0, 0.1) 100%);
+}
+
+.keyboardInput {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Update the loading animation to match the green theme */
+.loadingText {
+  color: var(--cyber-primary);
+  font-size: 1.5rem;
+  margin-bottom: 1rem;
+  text-shadow: var(--cyber-glow);
+  letter-spacing: 3px;
+}
+
+.loadingBar {
+  width: 60%;
+  height: 10px;
+  background-color: #000000;
+  border: 1px solid var(--cyber-primary);
+  position: relative;
+  overflow: hidden;
+}
+
+.loadingProgress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background-color: var(--cyber-primary);
+  animation: loading 2s infinite;
+  box-shadow: 0 0 10px var(--cyber-primary);
+}
+
+@keyframes loading {
+  0% {
+    width: 0%;
+  }
+  50% {
+    width: 100%;
+  }
+  100% {
+    width: 0%;
+  }
+}
+
+/* Sidebar */
+.sidebar {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  height: 70vh;
+  width: 300px;
+  background-color: rgba(0, 0, 0, 0.9);
+  border-right: 1px solid var(--cyber-border);
+  display: flex;
+  flex-direction: column;
+  z-index: 25;
+  transform: translateY(100%);
+  transition: transform 0.3s ease;
+}
+
+.sidebar.open {
+  transform: translateY(0);
+}
+
+.sidebarToggle {
+  position: absolute;
+  right: -40px;
+  bottom: 20px;
+  z-index: 26;
+  background-color: var(--cyber-bg);
+  border: 1px solid var(--cyber-primary);
+  color: var(--cyber-primary);
+  padding: 0.5rem;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.3s ease;
+  transform: rotate(90deg);
+  transform-origin: right center;
+}
+
+.sidebarToggle:hover {
+  background-color: rgba(0, 255, 0, 0.1);
+  box-shadow: var(--cyber-glow);
+}
+
+.sidebarHeader {
+  padding: 1rem;
+  border-bottom: 1px solid var(--cyber-border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.sidebarContent {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem;
+}
+
+/* Update console and debug panel for sidebar */
+.console,
+.debugPanel {
+  background-color: transparent;
+  border: none;
+  height: auto;
+  margin-bottom: 1rem;
+}
+
+.consoleHeader,
+.debugHeader {
+  background-color: transparent;
+  border-bottom: 1px solid var(--cyber-border);
+  padding: 0.5rem;
+}
+
+.consoleContent,
+.debugContent {
+  padding: 0.5rem;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+/* Remove the old bottom section styles */
+.bottomSection {
+  display: none;
+}
+
+/* Update mainInterface to remove bottom padding */
+.mainInterface {
+  padding-top: 60vh;
+}
+
+/* Active Button State */
+.cyberButton.active {
+  background-color: rgba(0, 255, 0, 0.2);
+  box-shadow: var(--cyber-glow-strong);
+}
+
+/* Responsive Adjustments */
+@media (max-width: 768px) {
+  .controlRow {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .coordinates {
+    margin-left: 0;
+    margin-top: 0.5rem;
+    width: 100%;
+    text-align: center;
+  }
+
+  .urlControl {
+    flex-direction: column;
+  }
+
+  .streamControls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .asciiArt,
+  .monitorTop,
+  .monitorBottom,
+  .monitorLeft,
+  .monitorRight {
+    font-size: 0.6rem;
+  }
+}
+
+/* Terminal Panel */
+.terminalPanel {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 70vh;
+  background-color: rgba(0, 0, 0, 0.9);
+  border-top: 1px solid var(--cyber-border);
+  display: flex;
+  flex-direction: column;
+  z-index: 1000;
+  transform: translateY(100%);
+  transition: transform 0.3s ease;
+}
+
+.terminalPanel.open {
+  transform: translateY(0);
+}
+
+.terminalToggle {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 1001;
+  background-color: var(--cyber-bg);
+  border: 1px solid var(--cyber-primary);
+  color: var(--cyber-primary);
+  padding: 0.5rem;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.3s ease;
+}
+
+.terminalToggle:hover {
+  background-color: rgba(0, 255, 0, 0.1);
+  box-shadow: var(--cyber-glow);
+}
+
+.terminalHeader {
+  padding: 1rem;
+  border-bottom: 1px solid var(--cyber-border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: rgba(0, 0, 0, 0.9);
+}
+
+.terminalContent {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem;
+}
+
+/* Add styles for browser control features */
+
+.performanceControls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.perfButton {
+  background-color: var(--cyber-bg);
+  color: var(--cyber-text);
+  border: 1px solid var(--cyber-border);
+  padding: 5px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.perfButton:hover {
+  background-color: rgba(0, 255, 0, 0.1);
+}
+
+.perfButton.active {
+  background-color: var(--cyber-primary);
+  color: var(--cyber-bg);
+}
+
+.coordinates {
+  font-family: monospace;
+  background-color: rgba(0, 0, 0, 0.6);
+  color: var(--cyber-text);
+  padding: 5px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--cyber-border);
+  margin-left: 20px;
+}
+
+.coordLabel {
+  color: var(--cyber-primary);
+  margin-right: 5px;
+  margin-left: 10px;
+}
+
+.coordLabel:first-child {
+  margin-left: 0;
+}
+
+.loading {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.7);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  z-index: 100;
+  color: var(--cyber-primary);
+}
+
+.loadingText {
+  font-family: monospace;
+  font-size: 1.5rem;
+  margin-bottom: 1rem;
+  text-shadow: 0 0 10px var(--cyber-primary);
+}
+
+.loadingBar {
+  width: 200px;
+  height: 10px;
+  background-color: rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--cyber-border);
+  border-radius: 5px;
+  overflow: hidden;
+  position: relative;
+}
+
+.loadingProgress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, transparent, var(--cyber-primary), transparent);
+  animation: loadingAnim 1.5s infinite linear;
+  transform: translateX(-100%);
+}
+
+@keyframes loadingAnim {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.screenshot {
+  width: 100%;
+  height: auto;
+  display: block;
+  border: 1px solid var(--cyber-border);
+}
+
+.overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  z-index: 10;
+}
+
+.browserView {
+  position: relative;
+  border: 1px solid var(--cyber-border);
+  background-color: var(--cyber-bg);
+  overflow: hidden;
+}
+
+.browserView.focused {
+  outline: 2px solid var(--cyber-primary);
+}
+
+.keyboardInput {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  width: 0;
+  height: 0;
+}
+
+.streamStatus {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 10px;
+}
+
+.statusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--cyber-primary);
+  box-shadow: 0 0 5px var(--cyber-primary);
+}
+
+.connected .statusDot {
+  background-color: #4caf50;
+  box-shadow: 0 0 5px #4caf50;
+}
+
+.disconnected .statusDot {
+  background-color: #f44336;
+  box-shadow: 0 0 5px #f44336;
+}
+
+.status {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+
+.status.success {
+  background-color: rgba(0, 255, 0, 0.1);
+  color: #4caf50;
+  border: 1px solid #4caf50;
+}
+
+.status.error {
+  background-color: rgba(255, 0, 0, 0.1);
+  color: #f44336;
+  border: 1px solid #f44336;
+}
+
+/* Ensure the terminal fits the design */
+.terminalContent {
+  display: flex;
+  flex-direction: column; /* Changed from grid layout to column */
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .controlRow {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .coordinates {
+    margin-left: 0;
+    margin-top: 10px;
+    width: 100%;
+    text-align: center;
+  }
+}
+
