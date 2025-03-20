@@ -44,14 +44,30 @@ body {
 }
 /* Position the monitorFrame relatively to act as a container for the absolutely positioned browserView */
 .monitorFrame {
-  position: relative;
-  width: 100%;
-  height: 100%;
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 80vw;
+  max-width: 1200px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
   border: 2px solid var(--cyber-border);
   border-radius: 8px;
-  overflow: visible;
-  background-color: var(--cyber-bg);
+  z-index: 10;
+  overflow: hidden;
   box-shadow: var(--cyber-glow);
+  background-color: var(--cyber-bg);
+}
+
+/* Browser Header */
+.browserHeader {
+  width: 100%;
+  background-color: var(--cyber-bg-alt);
+  border-bottom: 1px solid var(--cyber-border);
+  padding: 8px;
+  z-index: 15;
 }
 
 /* Global Styles */
@@ -60,11 +76,8 @@ body {
   color: var(--cyber-text);
   min-height: 100vh;
   width: 100%;
-  padding: 1rem;
+  padding: 0;
   font-family: "Courier New", monospace;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
   position: relative;
   overflow: hidden;
 }
@@ -85,15 +98,17 @@ body {
 
 /* ASCII Art Header with Prismatic Effect */
 .asciiHeader {
-  width: 100%;
   display: flex;
   justify-content: center;
+  align-items: center;
   position: fixed;
   top: 0;
   left: 0;
-  z-index: 20;
-  background-color: rgba(0, 0, 0, 0.8);
-  padding: 0.5rem 0;
+  width: 100%;
+  text-align: center;
+  z-index: 5;
+  margin-top: 10px;
+  perspective: 1000px;
 }
 
 /* Update the ASCII art color to match the new green theme */
@@ -131,37 +146,26 @@ body {
 
 /* Main Interface */
 .mainInterface {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  width: 75%;
-  margin: 0 auto;
-  padding-top: 60vh;
+  position: relative;
+  width: 100%;
+  height: 100%;
 }
 
 /* Control Panel */
 .controlPanel {
-  background-color: var(--cyber-bg-alt);
-  border: 1px solid var(--cyber-border);
+  position: relative;
+  width: 100%;
+  padding: 10px;
+  background-color: rgba(0, 0, 0, 0.8);
   border-radius: 4px;
-  padding: 1rem;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
-  position: fixed;
-  top: 15%;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 70%;
-  max-width: 1008px;
-  z-index: 15;
-  background-color: rgba(0, 0, 0, 0.9);
+  gap: 10px;
 }
 
 .controlRow {
   display: flex;
-  gap: 1rem;
+  gap: 0.5rem;
   align-items: center;
   flex-wrap: wrap;
 }
@@ -171,9 +175,9 @@ body {
   background-color: #000000;
   color: var(--cyber-primary);
   border: 1px solid var(--cyber-primary);
-  padding: 0.5rem 1rem;
+  padding: 0.3rem 0.7rem;
   font-family: "Courier New", monospace;
-  font-size: 0.9rem;
+  font-size: 0.8rem;
   cursor: pointer;
   position: relative;
   overflow: hidden;
@@ -181,6 +185,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  height: 36px;
 }
 
 .cyberButton:hover {
@@ -218,8 +223,9 @@ body {
 /* URL Control */
 .urlControl {
   display: flex;
-  gap: 1rem;
+  gap: 0.5rem;
   align-items: center;
+  margin: 6px 0;
 }
 
 /* Update the URL input */
@@ -231,6 +237,8 @@ body {
   display: flex;
   align-items: center;
   padding: 0 0.5rem;
+  border-radius: 4px;
+  height: 36px;
 }
 
 .urlIcon {
@@ -253,11 +261,12 @@ body {
   color: var(--cyber-text-dim);
 }
 
-/* Stream Controls */
-.streamControls {
+/* Stream Controls and Performance Controls in one row */
+.streamControls, .performanceControls {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .streamStatus {
@@ -303,15 +312,19 @@ body {
   color: var(--cyber-text);
   border: 1px solid var(--cyber-border);
   font-family: "Courier New", monospace;
-  font-size: 0.9rem;
+  font-size: 0.8rem;
   margin-left: auto;
-  padding: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: 4px;
+  height: 36px;
+  display: flex;
+  align-items: center;
 }
 
 .coordLabel {
   color: var(--cyber-primary);
   margin-right: 0.25rem;
-  margin-left: 0.5rem;
+  margin-left: 0.25rem;
 }
 
 /* Status Messages */
@@ -371,14 +384,14 @@ body {
 
 /* Update the browser view to match the old console style */
 .browserView {
-  width: 100%;
   position: relative;
-  aspect-ratio: 16 / 9;
-  background-color: #000;
+  width: 100%;
+  height: 100%;
+  min-height: 300px;
+  background-color: var(--cyber-bg-alt);
   overflow: hidden;
-  border: 1px solid var(--cyber-primary);
-  box-shadow: inset 0 0 20px rgba(0, 255, 0, 0.2);
-  transform-origin: top center;
+  transition: all 0.3s ease;
+  border-top: 1px solid var(--cyber-border);
 }
 
 /* Remove the old ASCII monitor styles that are no longer needed */
@@ -400,16 +413,6 @@ body {
   object-fit: contain;
 }
 
-/* Update the overlay to have a subtle green tint */
-.overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  cursor: crosshair;
-  background: radial-gradient(circle at center, transparent 95%, rgba(0, 255, 0, 0.1) 100%);
-}
 
 .keyboardInput {
   position: absolute;
@@ -540,11 +543,6 @@ body {
   display: none;
 }
 
-/* Update mainInterface to remove bottom padding */
-.mainInterface {
-  padding-top: 60vh;
-}
-
 /* Active Button State */
 .cyberButton.active {
   background-color: rgba(0, 255, 0, 0.2);
@@ -639,21 +637,16 @@ body {
 
 /* Add styles for browser control features */
 
-.performanceControls {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 10px;
-}
-
 .perfButton {
   background-color: var(--cyber-bg);
   color: var(--cyber-text);
   border: 1px solid var(--cyber-border);
-  padding: 5px 10px;
+  padding: 0.3rem 0.5rem;
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.3s ease;
+  font-size: 0.8rem;
+  height: 28px;
 }
 
 .perfButton:hover {
@@ -663,26 +656,6 @@ body {
 .perfButton.active {
   background-color: var(--cyber-primary);
   color: var(--cyber-bg);
-}
-
-.coordinates {
-  font-family: monospace;
-  background-color: rgba(0, 0, 0, 0.6);
-  color: var(--cyber-text);
-  padding: 5px 10px;
-  border-radius: 4px;
-  border: 1px solid var(--cyber-border);
-  margin-left: 20px;
-}
-
-.coordLabel {
-  color: var(--cyber-primary);
-  margin-right: 5px;
-  margin-left: 10px;
-}
-
-.coordLabel:first-child {
-  margin-left: 0;
 }
 
 .loading {
@@ -746,8 +719,10 @@ body {
   left: 0;
   width: 100%;
   height: 100%;
-  cursor: pointer;
   z-index: 10;
+  cursor: crosshair;
+  pointer-events: all;
+  touch-action: none;
 }
 
 .browserView {
@@ -831,6 +806,271 @@ body {
     margin-top: 10px;
     width: 100%;
     text-align: center;
+  }
+}
+
+/* Navbar styles */
+.navbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 2rem;
+  background-color: rgba(0, 0, 0, 0.9);
+  border-bottom: 1px solid var(--cyber-border);
+  z-index: 30;
+  box-shadow: var(--cyber-glow);
+}
+
+.navbarLeft {
+  display: flex;
+  align-items: center;
+}
+
+.navbarRight {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.title {
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: var(--cyber-primary);
+  margin: 0;
+  letter-spacing: 2px;
+  text-shadow: var(--cyber-glow);
+}
+
+/* Update terminal toggle styles to fit in navbar */
+.terminalToggle {
+  background-color: transparent;
+  border: 1px solid var(--cyber-primary);
+  border-radius: 4px;
+  color: var(--cyber-primary);
+  width: 32px;
+  height: 32px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.terminalToggle:hover {
+  background-color: rgba(0, 255, 0, 0.1);
+  box-shadow: var(--cyber-glow);
+}
+
+.terminalToggle .icon {
+  transition: transform 0.3s ease;
+}
+
+.terminalToggle .icon.rotate {
+  transform: rotate(180deg);
+}
+
+/* Snapshot component styles */
+.snapshotContainer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.snapshotButton {
+  background-color: transparent;
+  border: 1px solid var(--cyber-primary);
+  border-radius: 4px;
+  color: var(--cyber-primary);
+  width: 40px;
+  height: 40px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.snapshotButton:hover {
+  background-color: rgba(0, 255, 0, 0.1);
+  box-shadow: var(--cyber-glow);
+}
+
+.snapshotButton.loading {
+  cursor: wait;
+}
+
+.snapshotButton.success {
+  border-color: var(--cyber-success);
+  color: var(--cyber-success);
+}
+
+.snapshotButton.error {
+  border-color: var(--cyber-error);
+  color: var(--cyber-error);
+}
+
+.snapshotButton .loading {
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(0, 255, 0, 0.3);
+  border-top-color: var(--cyber-primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.snapshotMessage {
+  position: absolute;
+  bottom: -30px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: 0.8rem;
+  padding: 4px 8px;
+  border-radius: 2px;
+  background-color: rgba(0, 0, 0, 0.8);
+  z-index: 10;
+}
+
+.snapshotMessage.success {
+  color: var(--cyber-success);
+  border: 1px solid var(--cyber-success);
+}
+
+.snapshotMessage.error {
+  color: var(--cyber-error);
+  border: 1px solid var(--cyber-error);
+}
+
+.snapshotMessage.loading {
+  color: var(--cyber-primary);
+  border: 1px solid var(--cyber-primary);
+}
+
+/* Snapshot wrapper and label */
+.snapshotWrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.snapshotLabel {
+  font-size: 0.7rem;
+  color: var(--cyber-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+/* Notification Dialog */
+.notificationContainer {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 9999;
+}
+
+.notificationDialog {
+  position: relative;
+  background-color: rgba(0, 0, 0, 0.9);
+  border: 1px solid var(--cyber-border);
+  border-radius: 4px;
+  padding: 10px 15px;
+  color: var(--cyber-text);
+  font-family: "Courier New", monospace;
+  min-width: 250px;
+  max-width: 350px;
+  box-shadow: var(--cyber-glow);
+  animation: slideIn 0.3s ease-out forwards;
+}
+
+.notificationDialog.error {
+  border-color: var(--cyber-error);
+  box-shadow: 0 0 15px rgba(255, 51, 51, 0.7);
+}
+
+.notificationDialog.success {
+  border-color: var(--cyber-success);
+  box-shadow: 0 0 15px rgba(0, 255, 0, 0.7);
+}
+
+.notificationHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--cyber-border);
+  padding-bottom: 8px;
+}
+
+.notificationTitle {
+  font-weight: bold;
+  letter-spacing: 1px;
+  color: var(--cyber-primary);
+}
+
+.notificationTitle.error {
+  color: var(--cyber-error);
+}
+
+.notificationTitle.success {
+  color: var(--cyber-success);
+}
+
+.notificationClose {
+  background: none;
+  border: none;
+  color: var(--cyber-text-dim);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.notificationClose:hover {
+  color: var(--cyber-primary);
+}
+
+.notificationContent {
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideOut {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(100%);
+    opacity: 0;
   }
 }
 

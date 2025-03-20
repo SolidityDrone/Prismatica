@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
+import { NotificationProvider } from './components/NotificationContainer'
 
 const inter = Inter({ subsets: ['latin'] })
 import { headers } from 'next/headers' // added
@@ -23,7 +24,9 @@ export default async function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
-        <ContextProvider cookies={cookies}>{children}</ContextProvider>
+        <NotificationProvider>
+          <ContextProvider cookies={cookies}>{children}</ContextProvider>
+        </NotificationProvider>
       </body>
     </html>
   )
