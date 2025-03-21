@@ -1,4 +1,4 @@
-from flask import Flask, request, render_template, jsonify, send_from_directory, session
+from flask import Flask, request, render_template, jsonify, send_from_directory, session, send_file
 import subprocess
 import os
 import time
@@ -21,6 +21,7 @@ import json
 from datetime import datetime, timedelta
 import atexit
 from typing import Dict
+import zipfile
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
@@ -624,23 +625,61 @@ def scroll():
                 logger.error(f"Failed to auto-start browser: {str(e)}", exc_info=True)
                 return jsonify({"status": "error", "message": f"Failed to start browser: {str(e)}"})
         
-        # Convert the delta values to a reasonable scroll amount
-        scroll_x = int(delta_x * 0.5)
-        scroll_y = int(delta_y * 0.5)
+        # Validate scroll values
+        try:
+            delta_x = float(delta_x)
+            delta_y = float(delta_y)
+        except (TypeError, ValueError):
+            return jsonify({"status": "error", "message": "Invalid scroll values"})
         
-        # Execute JavaScript to scroll the page
-        script = f"""
-            window.scrollBy({scroll_x}, {scroll_y});
-            return [window.scrollX, window.scrollY];
-        """
-        scroll_position = session.browser.execute_script(script)
+        # Apply scroll speed factor based on the magnitude
+        # This provides smoother scrolling for both small and large scroll events
+        def apply_scroll_factor(delta):
+            # Use different factors for different magnitudes
+            if abs(delta) < 50:
+                return delta * 0.5  # Smooth for small scrolls
+            elif abs(delta) < 100:
+                return delta * 0.3  # Medium scroll speed
+            else:
+                return delta * 0.2  # Slower for large scrolls
         
-        logger.info(f"Scrolled by ({scroll_x}, {scroll_y}) for session {session_id}, new position: {scroll_position}")
+        scroll_x = apply_scroll_factor(delta_x)
+        scroll_y = apply_scroll_factor(delta_y)
+        
+        # Cap maximum scroll amount
+        MAX_SCROLL = 300
+        scroll_x = max(min(scroll_x, MAX_SCROLL), -MAX_SCROLL)
+        scroll_y = max(min(scroll_y, MAX_SCROLL), -MAX_SCROLL)
+        
+        # Execute JavaScript to scroll the page and get the new position
+        script = """
+            // Get current scroll position
+            const oldX = window.scrollX;
+            const oldY = window.scrollY;
+            
+            // Perform scroll
+            window.scrollBy(%f, %f);
+            
+            // Get new position and bounds
+            const maxX = Math.max(0, document.documentElement.scrollWidth - window.innerWidth);
+            const maxY = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+            
+            // Return scroll info
+            return {
+                position: [window.scrollX, window.scrollY],
+                delta: [window.scrollX - oldX, window.scrollY - oldY],
+                bounds: [maxX, maxY]
+            };
+        """ % (scroll_x, scroll_y)
+        
+        scroll_info = session.browser.execute_script(script)
+        
+        logger.info(f"Scroll result for session {session_id}: {scroll_info}")
         
         return jsonify({
             "status": "success",
             "message": f"Scrolled by ({scroll_x}, {scroll_y})",
-            "position": scroll_position,
+            "scroll_info": scroll_info,
             "session_id": session_id
         })
         
@@ -838,58 +877,128 @@ def save_page_info():
         # Create timestamp
         timestamp = datetime.now().isoformat()
         
-        # Create save directory if it doesn't exist
-        save_dir = os.path.join(SCREENSHOT_DIR, session_id, 'saved_pages')
-        os.makedirs(save_dir, exist_ok=True)
-        
-        # Generate filename based on timestamp
+        # Generate filename base
         filename_base = f"page_capture_{timestamp.replace(':', '-').replace('.', '_')}"
         
-        # Save HTML content
-        html_path = os.path.join(save_dir, f"{filename_base}.html")
-        with open(html_path, 'w', encoding='utf-8') as f:
-            f.write(html_content)
+        # Create a ZIP file in memory
+        memory_zip = BytesIO()
+        with zipfile.ZipFile(memory_zip, 'w', zipfile.ZIP_DEFLATED) as zf:
+            # Add HTML content
+            zf.writestr(f"{filename_base}.html", html_content)
+            
+            # Add screenshot
+            zf.writestr(f"{filename_base}.png", base64.b64decode(screenshot_data))
+            
+            # Create and add metadata
+            metadata = {
+                'url': current_url,
+                'timestamp': timestamp,
+                'wallet_address': wallet_address,
+                'html_file': f"{filename_base}.html",
+                'screenshot_file': f"{filename_base}.png",
+                'session_id': session_id
+            }
+            zf.writestr(f"{filename_base}.json", json.dumps(metadata, indent=2))
         
-        # Save screenshot
-        screenshot_path = os.path.join(save_dir, f"{filename_base}.png")
-        with open(screenshot_path, 'wb') as f:
-            f.write(base64.b64decode(screenshot_data))
-        
-        # Save metadata
-        metadata = {
-            'url': current_url,
-            'timestamp': timestamp,
-            'wallet_address': wallet_address,
-            'html_file': f"{filename_base}.html",
-            'screenshot_file': f"{filename_base}.png",
-            'session_id': session_id
-        }
-        
-        metadata_path = os.path.join(save_dir, f"{filename_base}.json")
-        with open(metadata_path, 'w') as f:
-            json.dump(metadata, f, indent=2)
+        # Prepare the zip file for download
+        memory_zip.seek(0)
         
         logger.info(f"Page info saved for session {session_id}: URL={current_url}, Timestamp={timestamp}")
         
-        return jsonify({
-            "status": "success",
-            "message": "Page information saved successfully",
-            "data": {
-                "url": current_url,
-                "timestamp": timestamp,
-                "wallet_address": wallet_address,
-                "session_id": session_id,
-                "files": {
-                    "html": f"{filename_base}.html",
-                    "screenshot": f"{filename_base}.png",
-                    "metadata": f"{filename_base}.json"
-                }
-            }
-        })
+        return send_file(
+            memory_zip,
+            mimetype='application/zip',
+            as_attachment=True,
+            download_name=f"{filename_base}.zip"
+        )
         
     except Exception as e:
         logger.error(f"Error saving page info for session {session_id}: {str(e)}", exc_info=True)
         return jsonify({"status": "error", "message": f"Error saving page info: {str(e)}"})
+
+@app.route('/list_saved_pages')
+def list_saved_pages():
+    """List all saved pages for the current session."""
+    session_id = get_session_id()
+    
+    try:
+        # Get the saved pages directory for this session
+        save_dir = os.path.join(SCREENSHOT_DIR, session_id, 'saved_pages')
+        if not os.path.exists(save_dir):
+            return jsonify({
+                "status": "success",
+                "message": "No saved pages found",
+                "pages": []
+            })
+        
+        # Find all JSON metadata files
+        metadata_files = glob.glob(os.path.join(save_dir, "page_capture_*.json"))
+        pages = []
+        
+        for metadata_file in metadata_files:
+            try:
+                with open(metadata_file, 'r') as f:
+                    metadata = json.load(f)
+                    # Add file paths to metadata
+                    metadata['files'] = {
+                        'html': os.path.basename(metadata_file).replace('.json', '.html'),
+                        'screenshot': os.path.basename(metadata_file).replace('.json', '.png'),
+                        'metadata': os.path.basename(metadata_file)
+                    }
+                    pages.append(metadata)
+            except Exception as e:
+                logger.error(f"Error reading metadata file {metadata_file}: {str(e)}")
+        
+        # Sort pages by timestamp, newest first
+        pages.sort(key=lambda x: x['timestamp'], reverse=True)
+        
+        return jsonify({
+            "status": "success",
+            "message": f"Found {len(pages)} saved pages",
+            "pages": pages
+        })
+        
+    except Exception as e:
+        logger.error(f"Error listing saved pages for session {session_id}: {str(e)}")
+        return jsonify({"status": "error", "message": f"Error listing saved pages: {str(e)}"})
+
+@app.route('/download_saved_page/<filename>')
+def download_saved_page(filename):
+    """Download a saved page file (HTML, screenshot, or metadata)."""
+    session_id = get_session_id()
+    
+    try:
+        # Get the saved pages directory for this session
+        save_dir = os.path.join(SCREENSHOT_DIR, session_id, 'saved_pages')
+        
+        # Ensure the file exists
+        file_path = os.path.join(save_dir, filename)
+        if not os.path.exists(file_path):
+            return jsonify({
+                "status": "error",
+                "message": "File not found"
+            }), 404
+        
+        # Determine content type based on file extension
+        content_type = 'application/json'  # default
+        if filename.endswith('.html'):
+            content_type = 'text/html'
+        elif filename.endswith('.png'):
+            content_type = 'image/png'
+        
+        return send_from_directory(
+            save_dir,
+            filename,
+            mimetype=content_type,
+            as_attachment=True
+        )
+        
+    except Exception as e:
+        logger.error(f"Error downloading file {filename} for session {session_id}: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "message": f"Error downloading file: {str(e)}"
+        }), 500
 
 def cleanup_temp_files():
     """Clean up temporary files on application exit."""

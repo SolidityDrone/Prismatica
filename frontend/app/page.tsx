@@ -5,6 +5,7 @@ import { useState, useRef, useEffect } from "react"
 import { Terminal, ChevronUp, ChevronDown } from "lucide-react"
 import { Navbar } from './components/Navbar'
 import { useNotification } from './components/NotificationContainer'
+import { Snapshot } from './components/snapshot'
 
 export default function Home() {
   const [isBrowserFocused, setIsBrowserFocused] = useState(false)
@@ -415,8 +416,9 @@ export default function Home() {
       const data = await response.json()
       console.log('Scroll API response data:', data)
       
-      if (data.status === 'success') {
-        logToConsole(`Scroll position: (${data.position[0]}, ${data.position[1]})`)
+      if (data.status === 'success' && data.scroll_info) {
+        const { position, delta, bounds } = data.scroll_info
+        logToConsole(`Scroll position: (${position[0]}, ${position[1]}) Delta: (${delta[0]}, ${delta[1]})`)
       } else {
         showStatus(data.message, true)
       }
@@ -477,6 +479,10 @@ export default function Home() {
 
   return (
     <div className="cyberContainer">
+      <div className="fixed top-4 left-4 z-50">
+        <Snapshot />
+      </div>
+
       <Navbar 
         consoleMessages={consoleMessages}
         isTerminalOpen={isTerminalOpen}
