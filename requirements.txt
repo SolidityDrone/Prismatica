@@ -1,0 +1,5 @@
+flask==2.0.1
+selenium==4.9.1
+webdriver-manager==3.8.6
+Pillow==10.0.0
+flask-cors==4.0.0 

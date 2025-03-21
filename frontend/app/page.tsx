@@ -94,7 +94,9 @@ export default function Home() {
       logToConsole("Checking browser status...")
       setLoading(true)
       
-      const response = await fetch(`${API_URL}/browser_status`)
+      const response = await fetch(`${API_URL}/browser_status`, {
+        credentials: 'include'
+      })
       const data = await response.json()
       
       setIsBrowserRunning(data.running)
@@ -119,6 +121,7 @@ export default function Home() {
       
       const response = await fetch(`${API_URL}/start_browser`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' }
       })
       
@@ -178,6 +181,7 @@ export default function Home() {
       
       const response = await fetch(`${API_URL}/navigate`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: url.trim() })
       })
@@ -207,7 +211,11 @@ export default function Home() {
         const timeoutId = setTimeout(() => controller.abort(), 500)
         
         const response = await fetch(`${API_URL}/get_screenshot_data`, { 
-          signal: controller.signal 
+          signal: controller.signal,
+          credentials: 'include',  // Include cookies for session management
+          headers: {
+            'Content-Type': 'application/json'
+          }
         })
         
         clearTimeout(timeoutId)
@@ -215,6 +223,8 @@ export default function Home() {
         
         if (data.data) {
           setScreenshotData(data.data)
+        } else if (data.error) {
+          console.warn('Screenshot data error:', data.error)
         }
       } catch (error) {
         if (error instanceof Error && error.name !== 'AbortError') {
@@ -449,7 +459,7 @@ export default function Home() {
         // Reset accumulator after sending
         scrollAccumulatorRef.current = { deltaX: 0, deltaY: 0 }
       }
-    }, 50) // 150ms debounce - adjust as needed
+    }, 50) // 50ms debounce - reduced from 150ms for faster response
   }
 
   // Clean up the timeout on component unmount
