@@ -14,6 +14,7 @@ export const Snapshot = () => {
         try {
             const response = await fetch('http://localhost:5000/save_page_info', {
                 method: 'POST',
+                credentials: 'include',
                 headers: {
                     'Content-Type': 'application/json',
                 },

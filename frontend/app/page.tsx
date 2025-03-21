@@ -252,6 +252,7 @@ export default function Home() {
       
       const response = await fetch(`${API_URL}/click`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ x, y })
       })
@@ -278,6 +279,7 @@ export default function Home() {
       
       const response = await fetch(`${API_URL}/type_text`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text })
       })
@@ -299,6 +301,7 @@ export default function Home() {
       
       const response = await fetch(`${API_URL}/send_key`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           key: keyToSend,
@@ -403,6 +406,7 @@ export default function Home() {
       
       const response = await fetch(`${API_URL}/scroll`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ deltaX, deltaY })
       })

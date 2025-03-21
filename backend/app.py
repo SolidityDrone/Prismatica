@@ -18,8 +18,9 @@ from selenium.webdriver.common.keys import Keys
 from PIL import Image
 from flask_cors import CORS
 import json
-import datetime
+from datetime import datetime, timedelta
 import atexit
+from typing import Dict
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
@@ -28,23 +29,81 @@ logger = logging.getLogger('remote_browser')
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)  # Add a secret key for sessions
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # Allow cookies in cross-origin requests
+app.config['SESSION_COOKIE_SECURE'] = False  # Set to True in production with HTTPS
+
 # Enable CORS for all routes with credentials support
-CORS(app, resources={r"/*": {"origins": ["http://localhost:3000"], "supports_credentials": True}})
+CORS(app, 
+     resources={r"/*": {
+         "origins": ["http://localhost:3000"],
+         "supports_credentials": True,
+         "allow_headers": ["Content-Type"],
+         "expose_headers": ["Set-Cookie"],
+         "methods": ["GET", "POST", "OPTIONS"]
+     }})
 
 # Create a temporary directory for screenshots
 SCREENSHOT_DIR = tempfile.mkdtemp(prefix="browser_screenshots_")
 logger.info(f"Using temporary directory for screenshots: {SCREENSHOT_DIR}")
 
-# Session management dictionaries
-browser_instances = {}  # Maps session_id -> browser instance
-screenshot_threads = {}  # Maps session_id -> screenshot thread
-keep_taking_screenshots = {}  # Maps session_id -> boolean flag
-current_screenshots = {}  # Maps session_id -> current screenshot filename
-current_screenshot_data = {}  # Maps session_id -> base64 encoded screenshot data
+class BrowserSession:
+    def __init__(self):
+        self.browser = None
+        self.last_activity = datetime.now()
+        self.screenshot_thread = None
+        self.keep_taking_screenshots = True
+        self.current_screenshot = "placeholder.png"
+        self.current_screenshot_data = None
+        self.screenshot_lock = threading.Lock()
+        self.browser_lock = threading.Lock()
+        self.screenshot_dir = tempfile.mkdtemp(prefix=f"browser_screenshots_{uuid.uuid4()}_")
 
-# Locks
-screenshot_locks = {}  # Maps session_id -> screenshot lock
-browser_locks = {}  # Maps session_id -> browser lock
+    def update_activity(self):
+        self.last_activity = datetime.now()
+
+    def cleanup(self):
+        try:
+            if self.browser:
+                self.browser.quit()
+            if self.screenshot_dir:
+                shutil.rmtree(self.screenshot_dir, ignore_errors=True)
+        except Exception as e:
+            logger.error(f"Error cleaning up browser session: {str(e)}")
+
+class SessionManager:
+    def __init__(self):
+        self.sessions: Dict[str, BrowserSession] = {}
+        self.cleanup_thread = threading.Thread(target=self._cleanup_inactive_sessions, daemon=True)
+        self.cleanup_thread.start()
+
+    def get_session(self, session_id: str) -> BrowserSession:
+        if session_id not in self.sessions:
+            self.sessions[session_id] = BrowserSession()
+        self.sessions[session_id].update_activity()
+        return self.sessions[session_id]
+
+    def remove_session(self, session_id: str):
+        if session_id in self.sessions:
+            self.sessions[session_id].cleanup()
+            del self.sessions[session_id]
+
+    def _cleanup_inactive_sessions(self):
+        while True:
+            try:
+                current_time = datetime.now()
+                inactive_sessions = [
+                    session_id for session_id, session in self.sessions.items()
+                    if (current_time - session.last_activity) > timedelta(minutes=30)
+                ]
+                for session_id in inactive_sessions:
+                    logger.info(f"Cleaning up inactive session: {session_id}")
+                    self.remove_session(session_id)
+            except Exception as e:
+                logger.error(f"Error in cleanup thread: {str(e)}")
+            time.sleep(300)  # Check every 5 minutes
+
+# Initialize the session manager
+session_manager = SessionManager()
 
 # Constants
 MAX_SCREENSHOTS = 3  # Keep fewer screenshots to reduce disk I/O
@@ -62,28 +121,11 @@ def get_session_id():
     if 'session_id' not in session:
         session['session_id'] = str(uuid.uuid4())
         logger.info(f"Created new session: {session['session_id']}")
-        
-        # Initialize session-specific locks
-        if session['session_id'] not in screenshot_locks:
-            screenshot_locks[session['session_id']] = threading.Lock()
-        if session['session_id'] not in browser_locks:
-            browser_locks[session['session_id']] = threading.Lock()
-        
-        # Set default values for this session
-        current_screenshots[session['session_id']] = "placeholder.png"
-        keep_taking_screenshots[session['session_id']] = False
-        
-        # Create session directory for screenshots
-        session_dir = os.path.join(SCREENSHOT_DIR, session['session_id'])
-        os.makedirs(session_dir, exist_ok=True)
-        
-        # Create a placeholder screenshot for this session
-        placeholder_path = os.path.join(session_dir, "placeholder.png")
-        if not os.path.exists(placeholder_path):
-            img = Image.new('RGB', (800, 600), color='gray')
-            img.save(placeholder_path)
     
-    return session['session_id']
+    session_id = session['session_id']
+    # Ensure the session exists in the session manager
+    session_manager.get_session(session_id)
+    return session_id
 
 def get_session_dir(session_id):
     """Get the screenshot directory for this session."""
@@ -91,128 +133,135 @@ def get_session_dir(session_id):
     os.makedirs(session_dir, exist_ok=True)
     return session_dir
 
-def setup_browser(session_id):
-    """Initialize the headless browser for a specific session with detailed logging."""
-    session_browser_lock = browser_locks.get(session_id) or threading.Lock()
+def setup_browser(session_id: str):
+    """Initialize the headless browser with detailed logging for a specific session."""
+    session = session_manager.get_session(session_id)
     
-    with session_browser_lock:
-        if session_id in browser_instances and browser_instances[session_id] is not None:
-            logger.info(f"Browser for session {session_id} already running, reusing existing instance")
-            return browser_instances[session_id]
+    with session.browser_lock:
+        if session.browser is not None:
+            logger.info(f"Browser already running for session {session_id}, reusing existing instance")
+            return session.browser
         
         try:
             logger.info(f"Setting up Chrome browser for session {session_id}...")
-            
-            # Create a temporary directory that will be automatically cleaned up
-            temp_profile_dir = tempfile.mkdtemp(prefix=f"chrome_temp_{session_id}_")
-            logger.info(f"Created temporary Chrome profile directory: {temp_profile_dir}")
-            
-            # Set up debugging port (unique for each session)
-            debugging_port = 9222 + hash(session_id) % 1000
-            
-            # Configure Chrome options
             chrome_options = Options()
-            chrome_options.add_argument(f"--remote-debugging-port={debugging_port}")
-            chrome_options.add_argument(f"--user-data-dir={temp_profile_dir}")
-            chrome_options.add_argument("--no-first-run")
-            chrome_options.add_argument("--no-default-browser-check")
-            chrome_options.add_argument("--headless")
-            chrome_options.add_argument("--disable-gpu")
+            chrome_options.add_argument("--headless=new")
             chrome_options.add_argument("--no-sandbox")
             chrome_options.add_argument("--disable-dev-shm-usage")
+            chrome_options.add_argument("--disable-gpu")
             chrome_options.add_argument("--window-size=1920,1080")
             chrome_options.add_argument("--disable-extensions")
-            chrome_options.add_argument("--disable-logging")
-            chrome_options.add_argument("--log-level=3")
-            chrome_options.add_argument("--silent")
+            chrome_options.add_argument("--disable-dev-tools")
+            chrome_options.add_argument("--remote-debugging-port=9222")  # Fixed debugging port
+            chrome_options.add_argument("--disable-features=VizDisplayCompositor")
             
-            # Check chromedriver
-            chromedriver_path = "./chromedriver-linux64/chromedriver"
-            if not os.path.exists(chromedriver_path):
-                error_msg = f"Chromedriver not found at {chromedriver_path}"
-                logger.error(error_msg)
-                raise Exception(error_msg)
+            # Create temp directories
+            temp_dir = os.path.join(tempfile.gettempdir(), f"chrome-temp-{session_id}")
+            if os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir)
+            os.makedirs(temp_dir)
             
-            if not os.access(chromedriver_path, os.X_OK):
-                logger.info("Chromedriver not executable, attempting to make it executable")
-                os.chmod(chromedriver_path, 0o755)
+            chrome_options.add_argument(f"--user-data-dir={temp_dir}")
             
-            logger.info(f"Using chromedriver at: {chromedriver_path}")
+            # Try different possible Chrome binary locations
+            chrome_binary_paths = [
+                "/usr/bin/google-chrome",
+                "/usr/bin/google-chrome-stable",
+                "/usr/bin/chromium",
+                "/usr/bin/chromium-browser",
+                "/snap/bin/chromium",
+                "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+                "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+            ]
             
-            # Configure webdriver service with logging
+            chrome_binary = None
+            for path in chrome_binary_paths:
+                if os.path.exists(path):
+                    chrome_binary = path
+                    break
+            
+            if chrome_binary:
+                logger.info(f"Found Chrome binary at: {chrome_binary}")
+                chrome_options.binary_location = chrome_binary
+            else:
+                logger.warning("Chrome binary not found in common locations, will try to use system default")
+            
+            # Try different possible chromedriver locations
+            chromedriver_paths = [
+                "./chromedriver",
+                "./chromedriver.exe",
+                "./chromedriver-linux64/chromedriver",
+                "/usr/local/bin/chromedriver",
+                "/usr/bin/chromedriver",
+            ]
+            
+            chromedriver_path = None
+            for path in chromedriver_paths:
+                if os.path.exists(path):
+                    chromedriver_path = path
+                    break
+            
+            if not chromedriver_path:
+                raise Exception("ChromeDriver not found in any of the expected locations")
+            
+            logger.info(f"Using ChromeDriver at: {chromedriver_path}")
+            
+            # Make sure chromedriver is executable
+            if os.name != 'nt':  # Not Windows
+                try:
+                    os.chmod(chromedriver_path, 0o755)
+                except Exception as e:
+                    logger.warning(f"Failed to make chromedriver executable: {e}")
+            
             service = Service(
                 executable_path=chromedriver_path,
-                log_output=os.path.join(temp_profile_dir, "chromedriver.log")
+                log_path=os.path.join(temp_dir, "chromedriver.log")
             )
             
-            # Create the browser instance
-            logger.info(f"Creating Chrome webdriver instance for session {session_id} with debugging port {debugging_port}...")
-            try:
-                browser = webdriver.Chrome(service=service, options=chrome_options)
-                logger.info(f"Chrome instance created successfully for session {session_id}")
-            except Exception as e:
-                logger.error(f"Failed to create Chrome instance: {str(e)}")
-                # Try to read chromedriver log if it exists
-                log_path = os.path.join(temp_profile_dir, "chromedriver.log")
-                if os.path.exists(log_path):
-                    with open(log_path, 'r') as f:
-                        logger.error(f"Chromedriver log contents: {f.read()}")
-                # Clean up the temporary directory on failure
-                shutil.rmtree(temp_profile_dir, ignore_errors=True)
-                raise
+            logger.info("Creating Chrome webdriver instance...")
+            session.browser = webdriver.Chrome(service=service, options=chrome_options)
+            session.browser.set_window_size(1920, 1080)
+            logger.info("Chrome webdriver instance created successfully")
             
-            # Store the browser instance and its temporary directory
-            browser_instances[session_id] = browser
-            browser_instances[session_id].temp_profile_dir = temp_profile_dir
+            # Test with a simple navigation
+            session.browser.set_page_load_timeout(30)
+            session.browser.get("about:blank")
+            logger.info("Initial navigation successful")
             
-            # Test the browser instance
-            logger.info(f"Testing browser instance by navigating to Google...")
-            try:
-                browser.set_page_load_timeout(10)
-                browser.get("https://www.google.com")
-                logger.info(f"Current page title: {browser.title}")
-                logger.info(f"Initial navigation successful for session {session_id}")
-            except Exception as e:
-                logger.error(f"Failed to load initial page: {str(e)}")
-                raise
+            # Store the temp directory for cleanup
+            session.browser.temp_dir = temp_dir
             
-            # Start screenshot thread for this session
             start_screenshot_thread(session_id)
             
-            # Set last activity time for session timeout
-            browser_instances[session_id].last_activity = time.time()
-            
-            return browser
+            return session.browser
             
         except Exception as e:
-            logger.error(f"Failed to initialize browser for session {session_id}", exc_info=True)
-            logger.error(f"Error details: {str(e)}")
+            error_msg = f"Failed to initialize browser for session {session_id}: {str(e)}"
+            logger.error(error_msg, exc_info=True)
             
-            # Cleanup on failure
-            if session_id in browser_instances and browser_instances[session_id]:
+            if session.browser:
                 try:
-                    browser_instances[session_id].quit()
-                except Exception as cleanup_error:
-                    logger.error(f"Error during browser cleanup: {str(cleanup_error)}")
-                browser_instances[session_id] = None
+                    session.browser.quit()
+                except:
+                    pass
+                session.browser = None
             
-            # Clean up temporary directory on failure
-            if 'temp_profile_dir' in locals():
-                try:
-                    shutil.rmtree(temp_profile_dir, ignore_errors=True)
-                    logger.info(f"Cleaned up temporary profile directory after failure: {temp_profile_dir}")
-                except Exception as cleanup_error:
-                    logger.error(f"Error cleaning up temporary profile directory: {str(cleanup_error)}")
+            # Clean up temp directory
+            try:
+                if 'temp_dir' in locals():
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+            except:
+                pass
             
-            raise
+            raise Exception(error_msg)
 
 def cleanup_old_screenshots(session_id):
     """Delete old screenshots for a session, keeping only the most recent ones."""
-    session_dir = get_session_dir(session_id)
+    session = session_manager.get_session(session_id)
     try:
         # Get all screenshot files sorted by modification time (newest first)
         files = sorted(
-            glob.glob(os.path.join(session_dir, "screenshot-*.png")),
+            glob.glob(os.path.join(session.screenshot_dir, "screenshot-*.png")),
             key=os.path.getmtime,
             reverse=True
         )
@@ -229,39 +278,38 @@ def cleanup_old_screenshots(session_id):
 
 def start_screenshot_thread(session_id):
     """Start the screenshot thread for a specific session if not already running."""
-    if session_id in screenshot_threads and screenshot_threads[session_id] is not None and screenshot_threads[session_id].is_alive():
+    session = session_manager.get_session(session_id)
+    
+    if session.screenshot_thread is not None and session.screenshot_thread.is_alive():
         logger.info(f"Screenshot thread for session {session_id} already running")
         return
     
     logger.info(f"Starting screenshot thread for session {session_id}...")
-    keep_taking_screenshots[session_id] = True
-    screenshot_threads[session_id] = threading.Thread(
+    session.keep_taking_screenshots = True
+    session.screenshot_thread = threading.Thread(
         target=take_screenshots, 
         args=(session_id,)
     )
-    screenshot_threads[session_id].daemon = True
-    screenshot_threads[session_id].start()
+    session.screenshot_thread.daemon = True
+    session.screenshot_thread.start()
     logger.info(f"Screenshot thread started for session {session_id}")
 
 def take_screenshots(session_id):
     """Continuously take screenshots for a specific session."""
     logger.info(f"Screenshot thread started for session {session_id}")
     
-    session_dir = get_session_dir(session_id)
-    session_lock = screenshot_locks.get(session_id) or threading.Lock()
+    session = session_manager.get_session(session_id)
     
-    while keep_taking_screenshots.get(session_id, False):
+    while session.keep_taking_screenshots:
         try:
             # Check if browser instance exists and is responsive
-            if session_id not in browser_instances or browser_instances[session_id] is None:
+            if session.browser is None:
                 logger.warning(f"Browser instance not available for session {session_id}")
                 time.sleep(0.5)
                 continue
             
-            browser = browser_instances[session_id]
-            
             # Take screenshot
-            screenshot_data = browser.get_screenshot_as_base64()
+            screenshot_data = session.browser.get_screenshot_as_base64()
             if not screenshot_data:
                 logger.error(f"Failed to capture screenshot for session {session_id}: No data returned")
                 time.sleep(0.5)  # Wait a bit longer on error
@@ -270,17 +318,17 @@ def take_screenshots(session_id):
             # Generate filename with timestamp
             timestamp = int(time.time() * 1000)
             filename = f"screenshot-{timestamp}.png"
-            filepath = os.path.join(session_dir, filename)
+            filepath = os.path.join(session.screenshot_dir, filename)
             
             # Save screenshot and update current data
-            with session_lock:
+            with session.screenshot_lock:
                 # Save the file
                 with open(filepath, 'wb') as f:
                     f.write(base64.b64decode(screenshot_data))
                 
                 # Update current screenshot information
-                current_screenshots[session_id] = filename
-                current_screenshot_data[session_id] = screenshot_data
+                session.current_screenshot = filename
+                session.current_screenshot_data = screenshot_data
                 
                 # Clean up old screenshots
                 cleanup_old_screenshots(session_id)
@@ -300,48 +348,31 @@ def stop_session_browser(session_id):
     """Stop the browser and screenshot thread for a specific session."""
     logger.info(f"Stopping browser for session {session_id}")
     
-    # Stop screenshot thread
-    keep_taking_screenshots[session_id] = False
+    session = session_manager.get_session(session_id)
+    session.keep_taking_screenshots = False
     
-    # Get session lock
-    session_browser_lock = browser_locks.get(session_id) or threading.Lock()
-    
-    with session_browser_lock:
-        if session_id in browser_instances and browser_instances[session_id]:
+    with session.browser_lock:
+        if session.browser:
             try:
                 logger.info(f"Quitting browser for session {session_id}...")
-                browser_instances[session_id].quit()
-                
-                # Clean up temporary profile directory
-                if hasattr(browser_instances[session_id], 'temp_profile_dir'):
-                    temp_dir = browser_instances[session_id].temp_profile_dir
-                    try:
-                        shutil.rmtree(temp_dir, ignore_errors=True)
-                        logger.info(f"Cleaned up temporary profile directory for session {session_id}")
-                    except Exception as e:
-                        logger.error(f"Error cleaning up temporary profile directory for session {session_id}: {str(e)}")
-                
+                session.browser.quit()
+                session.browser = None
+                logger.info(f"Browser stopped for session {session_id}")
             except Exception as e:
                 logger.error(f"Error quitting browser for session {session_id}: {str(e)}")
-            finally:
-                browser_instances[session_id] = None
-                logger.info(f"Browser stopped for session {session_id}")
+                session.browser = None
 
 def check_session_timeouts():
     """Check for and close inactive browser sessions."""
-    current_time = time.time()
-    sessions_to_check = list(browser_instances.keys())
+    current_time = datetime.now()
     
-    for session_id in sessions_to_check:
-        if session_id in browser_instances and browser_instances[session_id] is not None:
-            # Check if session has a last_activity attribute
-            if hasattr(browser_instances[session_id], 'last_activity'):
-                last_activity = browser_instances[session_id].last_activity
-                if current_time - last_activity > SESSION_TIMEOUT:
-                    logger.info(f"Session {session_id} timed out after {SESSION_TIMEOUT} seconds of inactivity")
-                    stop_session_browser(session_id)
+    # Get a list of all sessions
+    for session_id, session in session_manager.sessions.items():
+        if session.browser is not None:
+            if (current_time - session.last_activity) > timedelta(seconds=SESSION_TIMEOUT):
+                logger.info(f"Session {session_id} timed out after {SESSION_TIMEOUT} seconds of inactivity")
+                stop_session_browser(session_id)
 
-# Start a thread to periodically check for session timeouts
 def start_timeout_checker():
     """Start a thread to periodically check for session timeouts."""
     def timeout_checker():
@@ -354,11 +385,10 @@ def start_timeout_checker():
     timeout_thread.start()
     logger.info("Session timeout checker started")
 
-# Update the last activity time for a session
 def update_session_activity(session_id):
     """Update the last activity time for a session."""
-    if session_id in browser_instances and browser_instances[session_id] is not None:
-        browser_instances[session_id].last_activity = time.time()
+    session = session_manager.get_session(session_id)
+    session.update_activity()
 
 @app.route('/')
 def index():
@@ -407,23 +437,21 @@ def navigate():
             logger.warning(f"Navigation request missing URL for session {session_id}")
             return jsonify({"status": "error", "message": "URL is required"})
         
-        # Auto-start browser if not running
-        if session_id not in browser_instances or browser_instances[session_id] is None:
+        # Get session and browser
+        session = session_manager.get_session(session_id)
+        if session.browser is None:
             logger.info(f"Browser not started for session {session_id}, auto-starting...")
             try:
-                browser = setup_browser(session_id)
-                logger.info(f"Browser auto-started successfully for session {session_id}")
+                session.browser = setup_browser(session_id)
+                logger.info("Browser auto-started successfully")
             except Exception as e:
-                logger.error(f"Failed to auto-start browser for session {session_id}: {str(e)}", exc_info=True)
+                logger.error(f"Failed to auto-start browser: {str(e)}", exc_info=True)
                 return jsonify({"status": "error", "message": f"Failed to start browser: {str(e)}"})
         
         # Navigate to URL
         logger.info(f"Navigating to {url} for session {session_id}...")
-        browser_instances[session_id].get(url)
+        session.browser.get(url)
         logger.info(f"Successfully navigated to {url} for session {session_id}")
-        
-        # Update session activity
-        update_session_activity(session_id)
         
         return jsonify({"status": "success", "message": f"Navigated to {url}", "session_id": session_id})
     except Exception as e:
@@ -433,137 +461,146 @@ def navigate():
 @app.route('/click', methods=['POST'])
 def click():
     """Perform a click at the specified coordinates with auto-start if needed."""
-    session_id = get_session_id()
-    
     try:
+        # Get session ID from request or Flask session
+        session_id = get_session_id()  # Always use the Flask session ID
+        
         x = request.json.get('x')
         y = request.json.get('y') 
         logger.info(f"Received click request at coordinates ({x}, {y}) for session {session_id}")
         
         if x is None or y is None:
-            logger.warning(f"Click request missing coordinates for session {session_id}")
+            logger.warning("Click request missing coordinates")
             return jsonify({"status": "error", "message": "X and Y coordinates are required"})
         
-        # Auto-start browser if not running
-        if session_id not in browser_instances or browser_instances[session_id] is None:
+        # Get session and browser
+        session = session_manager.get_session(session_id)
+        if session.browser is None:
             logger.info(f"Browser not started for session {session_id}, auto-starting...")
             try:
-                browser = setup_browser(session_id)
-                logger.info(f"Browser auto-started successfully for session {session_id}")
+                session.browser = setup_browser(session_id)
+                logger.info("Browser auto-started successfully")
             except Exception as e:
-                logger.error(f"Failed to auto-start browser for session {session_id}: {str(e)}", exc_info=True)
+                logger.error(f"Failed to auto-start browser: {str(e)}", exc_info=True)
                 return jsonify({"status": "error", "message": f"Failed to start browser: {str(e)}"})
         
-        browser = browser_instances[session_id]
+        # Get the current window size
+        window_size = session.browser.get_window_size()
+        logger.info(f"Current window size for session {session_id}: {window_size}")
         
-        # Get both window and viewport sizes
-        window_size = browser.get_window_size()
-        viewport_size = browser.execute_script("""
-            return {
-                width: window.innerWidth || document.documentElement.clientWidth,
-                height: window.innerHeight || document.documentElement.clientHeight,
-                scroll_x: window.pageXOffset || document.documentElement.scrollLeft,
-                scroll_y: window.pageYOffset || document.documentElement.scrollTop
-            };
-        """)
+        # Ensure coordinates are within bounds
+        x = max(0, min(x, window_size['width']))
+        y = max(0, min(y, window_size['height']))
         
-        logger.info(f"Window size: {window_size}, Viewport size: {viewport_size}")
+        # Add visual click indicator before performing the actual click
+        script = f"""
+            // Create and append the click indicator
+            (function() {{
+                const clickIndicator = document.createElement('div');
+                clickIndicator.style.position = 'fixed';
+                clickIndicator.style.left = '{x}px';
+                clickIndicator.style.top = '{y}px';
+                clickIndicator.style.width = '20px';
+                clickIndicator.style.height = '20px';
+                clickIndicator.style.borderRadius = '50%';
+                clickIndicator.style.backgroundColor = 'rgba(255, 0, 0, 0.7)';
+                clickIndicator.style.transform = 'translate(-50%, -50%)';
+                clickIndicator.style.pointerEvents = 'none';
+                clickIndicator.style.zIndex = '99999';
+                clickIndicator.style.transition = 'all 0.5s ease-out';
+                
+                document.body.appendChild(clickIndicator);
+                
+                // Animate and remove
+                setTimeout(() => {{
+                    clickIndicator.style.width = '40px';
+                    clickIndicator.style.height = '40px';
+                    clickIndicator.style.opacity = '0';
+                }}, 50);
+                
+                setTimeout(() => {{
+                    document.body.removeChild(clickIndicator);
+                }}, 600);
+            }})();
+        """
+        session.browser.execute_script(script)
         
-        # Ensure coordinates are within viewport bounds
-        x = max(0, min(x, viewport_size['width']))
-        y = max(0, min(y, viewport_size['height']))
-        
-        # Add scroll offset to coordinates
-        actual_x = x + viewport_size['scroll_x']
-        actual_y = y + viewport_size['scroll_y']
-        
-        logger.info(f"Adjusted coordinates: ({actual_x}, {actual_y})")
-        
-        # Simple visual feedback
-        browser.execute_script(f"""
-            const dot = document.createElement('div');
-            dot.style.cssText = 'position:fixed;width:10px;height:10px;background:red;border-radius:50%;z-index:99999;pointer-events:none;';
-            dot.style.left = '{x}px';
-            dot.style.top = '{y}px';
-            document.body.appendChild(dot);
-            setTimeout(() => dot.remove(), 500);
-        """)
-        
+        # Method 1: Try using elementFromPoint with direct click AND focus
         try:
-            # First, try using JavaScript click for better reliability
-            click_result = browser.execute_script("""
-                const element = document.elementFromPoint(arguments[0], arguments[1]);
-                if (element) {
-                    element.click();
-                    return true;
-                }
-                return false;
-            """, x, y)
+            logger.info(f"Attempting direct element click at ({x}, {y}) for session {session_id}...")
+            script = f"""
+                try {{
+                    const element = document.elementFromPoint({x}, {y});
+                    const info = element ? {{
+                        tagName: element.tagName,
+                        id: element.id,
+                        className: element.className,
+                        text: element.innerText ? element.innerText.substring(0, 20) : ''
+                    }} : null;
+                    
+                    if (element) {{
+                        if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA' || 
+                            element.tagName === 'SELECT' || element.hasAttribute('contenteditable')) {{
+                            element.focus();
+                            console.log('Element focused:', element.tagName);
+                        }}
+                        
+                        element.click();
+                        
+                        if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA' || 
+                            element.tagName === 'SELECT' || element.hasAttribute('contenteditable')) {{
+                            setTimeout(() => element.focus(), 50);
+                        }}
+                        
+                        return {{success: true, element: info}};
+                    }}
+                    return {{success: false, message: 'No element found at position'}};
+                }} catch (e) {{
+                    return {{success: false, error: e.message}};
+                }}
+            """
+            result = session.browser.execute_script(script)
+            logger.info(f"JavaScript click result for session {session_id}: {result}")
             
-            if click_result:
-                logger.info(f"Click performed using JavaScript at ({x}, {y})")
-            else:
-                # If JavaScript click fails, use ActionChains
-                logger.info("JavaScript click failed, trying ActionChains...")
-                
-                # Reset mouse position to top-left corner
-                actions = ActionChains(browser)
-                actions.move_to_element(browser.find_element('tag name', 'body'))
-                actions.perform()
-                
-                # Move to the target coordinates and click
-                actions = ActionChains(browser)
-                actions.move_by_offset(x, y)
-                actions.click()
-                actions.perform()
-                
-                logger.info(f"Click performed using ActionChains at ({x}, {y})")
+            if result and result.get('success'):
+                return jsonify({
+                    "status": "success", 
+                    "message": f"Clicked element at ({x}, {y}): {result.get('element')}"
+                })
             
-            # Update session activity
-            update_session_activity(session_id)
+            # Method 2: Fall back to ActionChains with additional focus handling
+            logger.info(f"Trying ActionChains click at ({x}, {y}) for session {session_id}...")
+            actions = ActionChains(session.browser)
+            actions.move_by_offset(-10000, -10000)  # Move far out to reset position
+            actions.perform()
             
+            actions = ActionChains(session.browser)
+            actions.move_by_offset(x, y)
+            actions.click()
+            actions.perform()
+            
+            # Try to focus the element again after click
+            session.browser.execute_script(f"""
+                const element = document.elementFromPoint({x}, {y});
+                if (element && (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA' || 
+                    element.tagName === 'SELECT' || element.hasAttribute('contenteditable'))) {{
+                    element.focus();
+                    console.log('Focus applied after ActionChains click');
+                }}
+            """)
+            
+            logger.info(f"Click performed with ActionChains for session {session_id}")
             return jsonify({
-                "status": "success",
-                "message": f"Clicked at coordinates ({x}, {y})"
+                "status": "success", 
+                "message": f"Clicked at coordinates ({x}, {y}) using ActionChains"
             })
                 
         except Exception as e:
             logger.error(f"Click operation failed for session {session_id}: {str(e)}", exc_info=True)
-            
-            # Try one last time with direct JavaScript event dispatch
-            try:
-                logger.info("Trying direct JavaScript event dispatch...")
-                success = browser.execute_script("""
-                    const element = document.elementFromPoint(arguments[0], arguments[1]);
-                    if (element) {
-                        const event = new MouseEvent('click', {
-                            view: window,
-                            bubbles: true,
-                            cancelable: true,
-                            clientX: arguments[0],
-                            clientY: arguments[1]
-                        });
-                        element.dispatchEvent(event);
-                        return true;
-                    }
-                    return false;
-                """, x, y)
-                
-                if success:
-                    logger.info("Click performed using direct JavaScript event dispatch")
-                    return jsonify({
-                        "status": "success",
-                        "message": f"Clicked at coordinates ({x}, {y}) using JavaScript event"
-                    })
-                else:
-                    return jsonify({"status": "error", "message": f"Click error: No element found at coordinates"})
-                
-            except Exception as js_error:
-                logger.error(f"All click methods failed for session {session_id}: {str(js_error)}", exc_info=True)
-                return jsonify({"status": "error", "message": f"Click error: {str(e)}"})
+            return jsonify({"status": "error", "message": f"Click error: {str(e)}"})
             
     except Exception as e:
-        logger.error(f"Error during click operation for session {session_id}: {str(e)}", exc_info=True)
+        logger.error(f"Error during click operation: {str(e)}", exc_info=True)
         return jsonify({"status": "error", "message": f"Click error: {str(e)}"})
 
 @app.route('/scroll', methods=['POST'])
@@ -576,18 +613,18 @@ def scroll():
         delta_y = request.json.get('deltaY', 0)
         logger.info(f"Received scroll request with deltaX={delta_x}, deltaY={delta_y} for session {session_id}")
         
-        # Auto-start browser if not running
-        if session_id not in browser_instances or browser_instances[session_id] is None:
+        # Get session and browser
+        session = session_manager.get_session(session_id)
+        if session.browser is None:
             logger.info(f"Browser not started for session {session_id}, auto-starting...")
             try:
-                browser = setup_browser(session_id)
-                logger.info(f"Browser auto-started successfully for session {session_id}")
+                session.browser = setup_browser(session_id)
+                logger.info("Browser auto-started successfully")
             except Exception as e:
-                logger.error(f"Failed to auto-start browser for session {session_id}: {str(e)}", exc_info=True)
+                logger.error(f"Failed to auto-start browser: {str(e)}", exc_info=True)
                 return jsonify({"status": "error", "message": f"Failed to start browser: {str(e)}"})
         
         # Convert the delta values to a reasonable scroll amount
-        # Adjust these multipliers based on testing
         scroll_x = int(delta_x * 0.5)
         scroll_y = int(delta_y * 0.5)
         
@@ -596,12 +633,9 @@ def scroll():
             window.scrollBy({scroll_x}, {scroll_y});
             return [window.scrollX, window.scrollY];
         """
-        scroll_position = browser_instances[session_id].execute_script(script)
+        scroll_position = session.browser.execute_script(script)
         
         logger.info(f"Scrolled by ({scroll_x}, {scroll_y}) for session {session_id}, new position: {scroll_position}")
-        
-        # Update session activity
-        update_session_activity(session_id)
         
         return jsonify({
             "status": "success",
@@ -626,25 +660,23 @@ def type_text():
         if not text:
             return jsonify({"status": "error", "message": "No text provided"})
         
-        # Auto-start browser if not running
-        if session_id not in browser_instances or browser_instances[session_id] is None:
+        # Get session and browser
+        session = session_manager.get_session(session_id)
+        if session.browser is None:
             logger.info(f"Browser not started for session {session_id}, auto-starting...")
             try:
-                browser = setup_browser(session_id)
-                logger.info(f"Browser auto-started successfully for session {session_id}")
+                session.browser = setup_browser(session_id)
+                logger.info("Browser auto-started successfully")
             except Exception as e:
-                logger.error(f"Failed to auto-start browser for session {session_id}: {str(e)}", exc_info=True)
+                logger.error(f"Failed to auto-start browser: {str(e)}", exc_info=True)
                 return jsonify({"status": "error", "message": f"Failed to start browser: {str(e)}"})
         
         # Use ActionChains to send the text to the active element
-        actions = ActionChains(browser_instances[session_id])
+        actions = ActionChains(session.browser)
         actions.send_keys(text)
         actions.perform()
         
         logger.info(f"Text input sent: '{text}' for session {session_id}")
-        
-        # Update session activity
-        update_session_activity(session_id)
         
         return jsonify({
             "status": "success",
@@ -673,21 +705,22 @@ def send_key():
         if key not in KEY_MAPPING:
             return jsonify({"status": "error", "message": f"Unsupported key: {key}"})
         
-        # Auto-start browser if not running
-        if session_id not in browser_instances or browser_instances[session_id] is None:
+        # Get session and browser
+        session = session_manager.get_session(session_id)
+        if session.browser is None:
             logger.info(f"Browser not started for session {session_id}, auto-starting...")
             try:
-                browser = setup_browser(session_id)
-                logger.info(f"Browser auto-started successfully for session {session_id}")
+                session.browser = setup_browser(session_id)
+                logger.info("Browser auto-started successfully")
             except Exception as e:
-                logger.error(f"Failed to auto-start browser for session {session_id}: {str(e)}", exc_info=True)
+                logger.error(f"Failed to auto-start browser: {str(e)}", exc_info=True)
                 return jsonify({"status": "error", "message": f"Failed to start browser: {str(e)}"})
         
         # Map the key to Selenium Keys
         selenium_key = KEY_MAPPING.get(key)
         
         # Use ActionChains to send the key with shift modifier only
-        actions = ActionChains(browser_instances[session_id])
+        actions = ActionChains(session.browser)
         
         # Add shift modifier if needed
         if modifiers.get('shift'):
@@ -705,9 +738,6 @@ def send_key():
         
         logger.info(f"Key sent: {key} with modifiers: {modifiers} for session {session_id}")
         
-        # Update session activity
-        update_session_activity(session_id)
-        
         return jsonify({
             "status": "success",
             "message": f"Key sent: {key}",
@@ -722,34 +752,33 @@ def send_key():
 def get_latest_screenshot():
     """Get the filename of the latest screenshot."""
     session_id = get_session_id()
-    session_lock = screenshot_locks.get(session_id) or threading.Lock()
+    session = session_manager.get_session(session_id)
     
-    with session_lock:
-        filename = current_screenshots.get(session_id, "placeholder.png")
-        return jsonify({"filename": filename})
+    with session.screenshot_lock:
+        return jsonify({"filename": session.current_screenshot})
 
 @app.route('/get_screenshot_data')
 def get_screenshot_data():
     """Get the base64 encoded data of the latest screenshot for direct streaming."""
     session_id = get_session_id()
-    session_lock = screenshot_locks.get(session_id) or threading.Lock()
+    session = session_manager.get_session(session_id)
     
-    with session_lock:
-        data = current_screenshot_data.get(session_id)
-        return jsonify({"data": data})
+    with session.screenshot_lock:
+        return jsonify({"data": session.current_screenshot_data})
 
 @app.route('/screenshots/<filename>')
 def serve_screenshot(filename):
     """Serve a screenshot file."""
     session_id = get_session_id()
-    session_dir = get_session_dir(session_id)
-    return send_from_directory(session_dir, filename)
+    session = session_manager.get_session(session_id)
+    return send_from_directory(session.screenshot_dir, filename)
 
 @app.route('/browser_status')
 def browser_status():
     """Check if browser is running for the current session."""
     session_id = get_session_id()
-    is_running = session_id in browser_instances and browser_instances[session_id] is not None
+    session = session_manager.get_session(session_id)
+    is_running = session.browser is not None
     logger.info(f"Browser status check for session {session_id}: {'running' if is_running else 'not running'}")
     return jsonify({"running": is_running})
 
@@ -760,7 +789,7 @@ def system_info():
     import sys
     
     # Count active sessions
-    active_sessions = sum(1 for browser in browser_instances.values() if browser is not None)
+    active_sessions = sum(1 for session in session_manager.sessions.values() if session.browser is not None)
     
     info = {
         "platform": platform.platform(),
@@ -769,10 +798,9 @@ def system_info():
         "flask_version": app.version,
         "screenshot_dir": SCREENSHOT_DIR,
         "active_sessions": active_sessions,
-        "total_sessions_created": len(browser_instances),
+        "total_sessions_created": len(session_manager.sessions),
         "screenshot_interval": f"{SCREENSHOT_INTERVAL} seconds",
-        "max_screenshots": MAX_SCREENSHOTS,
-        "chrome_binary": chrome_options.binary_location if 'chrome_options' in locals() else "Not initialized"
+        "max_screenshots": MAX_SCREENSHOTS
     }
     logger.info(f"System info: {info}")
     return jsonify(info)
@@ -787,29 +815,28 @@ def save_page_info():
         wallet_address = request.json.get('wallet_address', 'Not connected')
         logger.info(f"Saving page info with wallet address: {wallet_address} for session {session_id}")
         
-        # Auto-start browser if not running
-        if session_id not in browser_instances or browser_instances[session_id] is None:
+        # Get session and browser
+        session = session_manager.get_session(session_id)
+        if session.browser is None:
             logger.info(f"Browser not started for session {session_id}, auto-starting...")
             try:
-                browser = setup_browser(session_id)
-                logger.info(f"Browser auto-started successfully for session {session_id}")
+                session.browser = setup_browser(session_id)
+                logger.info("Browser auto-started successfully")
             except Exception as e:
-                logger.error(f"Failed to auto-start browser for session {session_id}: {str(e)}", exc_info=True)
+                logger.error(f"Failed to auto-start browser: {str(e)}", exc_info=True)
                 return jsonify({"status": "error", "message": f"Failed to start browser: {str(e)}"})
         
-        browser = browser_instances[session_id]
-        
         # Get current URL
-        current_url = browser.current_url
+        current_url = session.browser.current_url
         
         # Get current HTML content
-        html_content = browser.page_source
+        html_content = session.browser.page_source
         
         # Get screenshot
-        screenshot_data = browser.get_screenshot_as_base64()
+        screenshot_data = session.browser.get_screenshot_as_base64()
         
         # Create timestamp
-        timestamp = datetime.datetime.now().isoformat()
+        timestamp = datetime.now().isoformat()
         
         # Create save directory if it doesn't exist
         save_dir = os.path.join(SCREENSHOT_DIR, session_id, 'saved_pages')
@@ -844,9 +871,6 @@ def save_page_info():
         
         logger.info(f"Page info saved for session {session_id}: URL={current_url}, Timestamp={timestamp}")
         
-        # Update session activity
-        update_session_activity(session_id)
-        
         return jsonify({
             "status": "success",
             "message": "Page information saved successfully",
@@ -874,23 +898,13 @@ def cleanup_temp_files():
         # Clean up screenshot directory
         shutil.rmtree(SCREENSHOT_DIR, ignore_errors=True)
         
-        # Clean up any remaining temporary Chrome profiles
-        for session_id, browser in browser_instances.items():
-            if browser and hasattr(browser, 'temp_profile_dir'):
-                try:
-                    temp_dir = browser.temp_profile_dir
-                    shutil.rmtree(temp_dir, ignore_errors=True)
-                    logger.info(f"Cleaned up temporary profile directory for session {session_id}")
-                except Exception as e:
-                    logger.error(f"Error cleaning up temporary profile directory for session {session_id}: {str(e)}")
-        
-        # Force quit any remaining browser instances
-        for session_id, browser in browser_instances.items():
-            if browser:
-                try:
-                    browser.quit()
-                except:
-                    pass
+        # Clean up any remaining sessions
+        for session_id, session in session_manager.sessions.items():
+            try:
+                session.cleanup()
+                logger.info(f"Cleaned up session {session_id}")
+            except Exception as e:
+                logger.error(f"Error cleaning up session {session_id}: {str(e)}")
                 
     except Exception as e:
         logger.error(f"Error during cleanup: {str(e)}")
